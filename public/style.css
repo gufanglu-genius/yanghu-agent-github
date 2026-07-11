@@ -1175,6 +1175,272 @@ body::before {
 }
 
 /* ============================================
+   语言风格切换
+   ============================================ */
+.style-toggle-section {
+  padding: 0 20px 12px;
+}
+
+.style-toggle-label {
+  font-size: 0.72rem;
+  color: #8a7a60;
+  margin-bottom: 6px;
+  letter-spacing: 0.06em;
+}
+
+.style-toggle {
+  display: flex;
+  background: rgba(255,255,255,0.06);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 2px;
+}
+
+.style-option {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #a09580;
+  text-align: center;
+  font-family: var(--font-serif);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.style-option.active {
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(184, 70, 62, 0.3);
+}
+
+.style-option:hover:not(.active) {
+  color: #d4c8b0;
+  background: rgba(255,255,255,0.05);
+}
+
+/* ============================================
+   快捷功能按钮
+   ============================================ */
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 32px 0;
+  overflow-x: auto;
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.quick-actions::-webkit-scrollbar { display: none; }
+
+.quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all var(--transition);
+  box-shadow: 0 1px 3px var(--color-shadow);
+  cursor: pointer;
+}
+
+.quick-btn:hover {
+  border-color: var(--color-accent-light);
+  color: var(--color-accent);
+  box-shadow: 0 2px 12px var(--color-shadow-md);
+  transform: translateY(-1px);
+}
+
+.quick-btn:active {
+  transform: scale(0.97);
+}
+
+.quick-icon {
+  font-size: 1rem;
+}
+
+/* ============================================
+   图片生成按钮
+   ============================================ */
+.btn-image {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--color-text-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  opacity: 0.5;
+}
+
+.btn-image:hover {
+  opacity: 1;
+  color: var(--color-accent);
+  background: rgba(184, 70, 62, 0.06);
+}
+
+.btn-image:disabled {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.btn-image.has-key {
+  opacity: 0.7;
+}
+
+/* ============================================
+   图片预览弹窗
+   ============================================ */
+.image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.image-modal.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.image-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 16, 8, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.image-modal-content {
+  position: relative;
+  z-index: 1;
+  max-width: 90vw;
+  max-height: 85vh;
+  background: var(--color-white);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.3);
+  animation: modalIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.9) translateY(20px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.image-modal-content img {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+.image-modal-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.image-modal-close:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.image-modal-hint {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+  margin-top: 10px;
+}
+
+/* 消息中嵌入的图片 */
+.message-bubble img.ai-image {
+  max-width: 280px;
+  max-height: 280px;
+  border-radius: var(--radius-md);
+  margin-top: 8px;
+  cursor: pointer;
+  display: block;
+  border: 1px solid var(--color-border-light);
+  transition: transform var(--transition);
+}
+
+.message-bubble img.ai-image:hover {
+  transform: scale(1.02);
+}
+
+/* 图片生成中加载状态 */
+.image-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  margin-top: 8px;
+  background: var(--color-bg-warm);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.image-loading .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ============================================
+   配置界面增强
+   ============================================ */
+.config-label {
+  display: block;
+  text-align: left;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.config-label .required {
+  color: var(--color-accent);
+}
+
+.config-label .optional {
+  color: var(--color-text-light);
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+
+.config-divider {
+  margin-bottom: 20px;
+}
+
+/* ============================================
    响应式
    ============================================ */
 @media (max-width: 768px) {

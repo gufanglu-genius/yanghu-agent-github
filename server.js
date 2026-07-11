@@ -174,6 +174,97 @@ app.post("/api/verify-key", async (req, res) => {
   }
 });
 
+// 验证千问 API Key
+app.post("/api/verify-qwen-key", async (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey) return res.status(400).json({ error: "未提供 API Key" });
+  try {
+    const r = await fetch("https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "wan2.1-t2i-turbo",
+        input: { prompt: "test" },
+        parameters: { size: "1024*1024", n: 1 },
+      }),
+    });
+    const data = await r.json();
+    // 有 output 或非 401 即视为有效
+    res.json({ valid: !(r.status === 401 || r.status === 403) });
+  } catch {
+    res.json({ valid: false });
+  }
+});
+
+// 千问图片生成代理
+app.post("/api/generate-image", async (req, res) => {
+  const { prompt, apiKey } = req.body;
+
+  if (!prompt) return res.status(400).json({ error: "未提供图片描述" });
+  if (!apiKey) return res.status(400).json({ error: "未配置千问 API Key" });
+
+  try {
+    const response = await fetch("https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable",
+      },
+      body: JSON.stringify({
+        model: "wan2.1-t2i-turbo",
+        input: { prompt },
+        parameters: { size: "1024*1024", n: 1 },
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.output?.task_id) {
+      // 异步任务，轮询等待结果
+      const taskId = data.output.task_id;
+      const imageUrl = await pollTaskResult(taskId, apiKey);
+      if (imageUrl) {
+        res.json({ imageUrl, taskId });
+      } else {
+        res.status(500).json({ error: "图片生成超时" });
+      }
+    } else if (data.output?.results?.[0]?.url) {
+      // 同步返回
+      res.json({ imageUrl: data.output.results[0].url });
+    } else {
+      console.error("千问图片生成失败:", JSON.stringify(data).slice(0, 300));
+      res.status(500).json({ error: data.message || "图片生成失败" });
+    }
+  } catch (err) {
+    console.error("图片生成异常:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 轮询异步图片任务结果
+async function pollTaskResult(taskId, apiKey, maxRetries = 30) {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const r = await fetch(`https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`, {
+        headers: { "Authorization": `Bearer ${apiKey}` },
+      });
+      const data = await r.json();
+      if (data.output?.task_status === "SUCCEEDED") {
+        return data.output.results?.[0]?.url || null;
+      } else if (data.output?.task_status === "FAILED") {
+        console.error("图片任务失败:", data.output.message);
+        return null;
+      }
+    } catch { /* 继续轮询 */ }
+  }
+  return null;
+}
+
 // 健康检查
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", name: "阳湖智能体" });
