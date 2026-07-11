@@ -59,6 +59,7 @@ const STATE = {
   isGenerating: false,
   apiKey: "",
   abortController: null,
+  typewriterTimer: null,
 };
 
 // ---------- DOM ----------
@@ -72,7 +73,6 @@ const DOM = {
   btnSend: $("#btnSend"),
   btnStop: $("#btnStop"),
   btnNewChat: $("#btnNewChat"),
-  chatInputArea: $("#chatInputArea"),
   configOverlay: $("#configOverlay"),
   apiKeyInput: $("#apiKeyInput"),
   btnSaveKey: $("#btnSaveKey"),
@@ -124,14 +124,14 @@ function saveToStorage() {
   try {
     localStorage.setItem("yanghu_conv", JSON.stringify(STATE.conversations));
     localStorage.setItem("yanghu_active", STATE.activeConvId || "");
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
 function saveApiKey() {
   try {
     if (STATE.apiKey) localStorage.setItem("yanghu_key", STATE.apiKey);
     else localStorage.removeItem("yanghu_key");
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
 function loadFromStorage() {
@@ -251,7 +251,7 @@ function handleNewChat() {
   DOM.messageInput.focus();
 }
 
-// ============ 流式消息发送 ============
+// ============ 核心：打字机逐字输出 ============
 
 async function sendMessage() {
   if (STATE.isGenerating) return;
@@ -273,18 +273,32 @@ async function sendMessage() {
   STATE.isGenerating = true;
   updateSendButton();
 
+  // 创建 AI 气泡（带闪烁光标）
+  const bubbleEl = createStreamBubble();
+
   // 构建 API 消息
   const apiMessages = [{ role: "system", content: SYSTEM_PROMPT }];
   apiMessages.push(...conv.messages.slice(-40).map(m => ({ role: m.role, content: m.content })));
 
-  // 创建空的气泡
-  const bubbleEl = createStreamBubble();
-  let fullText = "";
-
   STATE.abortController = new AbortController();
 
+  // 请求完整回复
+  let fullText = "";
   try {
-    fullText = await streamChat(apiMessages, bubbleEl);
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: apiMessages, apiKey: STATE.apiKey }),
+      signal: STATE.abortController.signal,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || "请求失败");
+    }
+
+    const data = await resp.json();
+    fullText = data.reply || "";
   } catch (e) {
     if (e.name === "AbortError") {
       removeStreamBubble();
@@ -293,99 +307,68 @@ async function sendMessage() {
       updateSendButton();
       return;
     }
-    console.warn("流式失败，使用 fallback:", e.message);
-    removeStreamBubble();
-    fullText = "";
+    fullText = "抱歉，阳湖文枢的墨香暂被风拂散……请稍后再试。";
   }
 
-  if (!fullText) {
-    // 非流式 fallback
-    try {
-      fullText = await nonStreamChat(apiMessages);
-    } catch (e) {
-      fullText = "抱歉，此刻阳湖文枢的墨香暂被风拂散……请稍后再试。";
-    }
+  if (!STATE.isGenerating) {
+    // 用户在中途停止了
     removeStreamBubble();
-    conv.messages.push({ role: "assistant", content: fullText });
-    conv.updatedAt = Date.now();
-    saveToStorage();
-    renderAll();
-  } else {
-    // 流式完成
-    finalizeStreamBubble(bubbleEl, fullText);
-    conv.messages.push({ role: "assistant", content: fullText });
-    conv.updatedAt = Date.now();
-    saveToStorage();
+    STATE.abortController = null;
+    updateSendButton();
+    return;
   }
+
+  // 逐字打字机动画
+  await typewrite(bubbleEl, fullText);
+
+  // 渲染 Markdown 并保存
+  finalizeStreamBubble(bubbleEl, fullText);
+  conv.messages.push({ role: "assistant", content: fullText });
+  conv.updatedAt = Date.now();
+  saveToStorage();
 
   STATE.isGenerating = false;
   STATE.abortController = null;
   updateSendButton();
 }
 
-// 流式 SSE 请求
-async function streamChat(messages, bubbleEl) {
-  const resp = await fetch("/api/chat/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, apiKey: STATE.apiKey }),
-    signal: STATE.abortController.signal,
-  });
+// 打字机动画核心
+function typewrite(bubbleEl, text) {
+  return new Promise((resolve) => {
+    const span = bubbleEl.querySelector(".streaming-text");
+    const cursor = bubbleEl.querySelector(".streaming-cursor");
+    if (!span) { resolve(); return; }
 
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${resp.status}`);
-  }
+    let i = 0;
+    const len = text.length;
+    if (len === 0) { resolve(); return; }
 
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let accumulated = "";
-  let done = false;
+    function next() {
+      if (!STATE.isGenerating) {
+        // 被用户中止 — 直接显示全部
+        span.textContent = text;
+        if (cursor) cursor.classList.add("stopped");
+        resolve();
+        return;
+      }
 
-  while (!done) {
-    const { done: streamDone, value } = await reader.read();
-    if (streamDone) break;
+      i++;
+      span.textContent = text.slice(0, i);
+      scrollToBottom();
 
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() || "";
-
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t || !t.startsWith("data:")) continue;
-      const payload = t.slice(5).trim();
-      if (payload === "[DONE]") { done = true; break; }
-      try {
-        const p = JSON.parse(payload);
-        if (p.error) throw new Error(p.error);
-        const delta = p.c || p.content || "";
-        if (delta) {
-          accumulated += delta;
-          updateStreamBubble(bubbleEl, accumulated);
-        }
-      } catch (e) {
-        if (e.message && !e.message.includes("JSON")) throw e;
+      if (i >= len) {
+        if (cursor) cursor.classList.add("stopped");
+        resolve();
+      } else {
+        const prev = text[i - 1];
+        // 标点停顿长，普通字快
+        const d = /[。！？\n]/.test(prev) ? 120 : /[，、；：]/.test(prev) ? 60 : 22;
+        STATE.typewriterTimer = setTimeout(next, d);
       }
     }
-  }
 
-  return accumulated;
-}
-
-// 非流式 fallback
-async function nonStreamChat(messages) {
-  const resp = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, apiKey: STATE.apiKey }),
+    next();
   });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${resp.status}`);
-  }
-  const data = await resp.json();
-  return data.reply || "";
 }
 
 // ============ 流式气泡 DOM ============
@@ -405,12 +388,6 @@ function createStreamBubble() {
   return row;
 }
 
-function updateStreamBubble(el, text) {
-  const span = el.querySelector(".streaming-text");
-  if (span) span.textContent = text;
-  scrollToBottom();
-}
-
 function finalizeStreamBubble(el, text) {
   const cursor = el.querySelector(".streaming-cursor");
   if (cursor) cursor.classList.add("stopped");
@@ -422,13 +399,6 @@ function finalizeStreamBubble(el, text) {
 function removeStreamBubble() {
   const el = document.getElementById("streamBubble");
   if (el) el.remove();
-}
-
-function saveAiMessage(conv, text, bubbleEl) {
-  finalizeStreamBubble(bubbleEl, text);
-  conv.messages.push({ role: "assistant", content: text });
-  conv.updatedAt = Date.now();
-  saveToStorage();
 }
 
 // ============ 输入框 ============
@@ -448,10 +418,14 @@ function updateSendButton() {
 }
 
 function stopGeneration() {
+  if (STATE.typewriterTimer) {
+    clearTimeout(STATE.typewriterTimer);
+    STATE.typewriterTimer = null;
+  }
   if (STATE.abortController) STATE.abortController.abort();
 }
 
-// ============ API 配置 ============
+// ============ API 配置界面 ============
 
 function isApiConfigured() {
   return !!(STATE.apiKey && STATE.apiKey.trim());
